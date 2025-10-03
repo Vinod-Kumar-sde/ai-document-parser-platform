@@ -1,0 +1,349 @@
+{% extends 'base.html' %}
+
+{% block title %}Documents - AI Document Processor{% endblock %}
+{% block page_title %}Documents{% endblock %}
+
+{% block page_actions %}
+<a href="{% url 'documents:upload_document' %}" class="btn btn-primary">
+    <i class="fas fa-upload"></i> Upload Document
+</a>
+{% endblock %}
+
+{% block content %}
+<!-- Filters -->
+<div class="card shadow mb-4">
+    <div class="card-body">
+        <form method="get" class="row g-3">
+            <div class="col-md-3">
+                <label for="search" class="form-label">Search</label>
+                <input type="text" class="form-control" id="search" name="search" 
+                       value="{{ search_query }}" placeholder="Search documents...">
+            </div>
+            <div class="col-md-2">
+                <label for="status" class="form-label">Status</label>
+                <select class="form-select" id="status" name="status">
+                    <option value="">All Status</option>
+                    <option value="uploaded" {% if status_filter == 'uploaded' %}selected{% endif %}>Uploaded</option>
+                    <option value="processing" {% if status_filter == 'processing' %}selected{% endif %}>Processing</option>
+                    <option value="completed" {% if status_filter == 'completed' %}selected{% endif %}>Completed</option>
+                    <option value="failed" {% if status_filter == 'failed' %}selected{% endif %}>Failed</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="file_type" class="form-label">File Type</label>
+                <select class="form-select" id="file_type" name="file_type">
+                    <option value="">All Types</option>
+                    <option value="pdf" {% if file_type_filter == 'pdf' %}selected{% endif %}>PDF</option>
+                    <option value="txt" {% if file_type_filter == 'txt' %}selected{% endif %}>Text</option>
+                    <option value="docx" {% if file_type_filter == 'docx' %}selected{% endif %}>Word</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">&nbsp;</label>
+                <div>
+                    <button type="submit" class="btn btn-outline-primary">
+                        <i class="fas fa-search"></i> Filter
+                    </button>
+                    <a href="{% url 'documents:document_list' %}" class="btn btn-outline-secondary">
+                        <i class="fas fa-times"></i> Clear
+                    </a>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Documents Table -->
+<div class="card shadow">
+    <div class="card-header py-3">
+        <h6 class="m-0 font-weight-bold text-primary">
+            Documents 
+            {% if page_obj.paginator.count %}
+                ({{ page_obj.paginator.count }} total)
+            {% endif %}
+        </h6>
+    </div>
+    <div class="card-body">
+        {% if page_obj %}
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Type</th>
+                            <th>Size</th>
+                            <th>Status</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="documents-tbody">
+                        {% for document in page_obj %}
+                        <tr data-document-id="{{ document.id }}">
+                            <td>
+                                <i class="fas fa-file-{{ document.file_type|default:'alt' }} me-2"></i>
+                                <a href="{% url 'documents:document_detail' document.id %}" class="text-decoration-none">
+                                    {{ document.title }}
+                                </a>
+                            </td>
+                            <td>
+                                <span class="badge bg-secondary">{{ document.file_type|upper }}</span>
+                            </td>
+                            <td>{{ document.file_size|filesizeformat }}</td>
+                            <td>
+                                <span class="badge status-badge {% if document.status == 'completed' %}bg-success text-white{% elif document.status == 'processing' %}bg-warning text-dark{% elif document.status == 'failed' %}bg-danger text-white{% elif document.status == 'uploaded' %}bg-info text-white{% else %}bg-secondary text-white{% endif %}" id="status-{{ document.id }}">
+                                    {{ document.status|title }}
+                                </span>
+                                {% if document.status == 'processing' %}
+                                <div class="progress processing-progress mt-1" id="progress-{{ document.id }}">
+                                    <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                         role="progressbar" style="width: 0%"></div>
+                                </div>
+                                {% endif %}
+                            </td>
+                            <td>{{ document.created_at|date:"M d, Y H:i" }}</td>
+                            <td>
+                                <div class="btn-group btn-group-sm" role="group">
+                                    <a href="{% url 'documents:document_detail' document.id %}" 
+                                       class="btn btn-outline-primary" title="View Details">
+                                        <i class="fas fa-eye"></i>
+                                    </a>
+                                    {% if document.file %}
+                                    <a href="{{ document.file.url }}" class="btn btn-outline-info" 
+                                       target="_blank" title="Download">
+                                        <i class="fas fa-download"></i>
+                                    </a>
+                                    {% endif %}
+                                    {% if document.status == 'processing' %}
+                                    <button class="btn btn-outline-danger" 
+                                            onclick="cancelProcessing('{{ document.id }}')" title="Cancel">
+                                        <i class="fas fa-stop"></i>
+                                    </button>
+                                    {% elif document.status == 'failed' %}
+                                    <button class="btn btn-outline-warning" 
+                                            onclick="reprocessDocument('{{ document.id }}')" title="Reprocess">
+                                        <i class="fas fa-redo"></i>
+                                    </button>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Pagination -->
+            {% if page_obj.has_other_pages %}
+            <nav aria-label="Documents pagination">
+                <ul class="pagination justify-content-center">
+                    {% if page_obj.has_previous %}
+                        <li class="page-item">
+                            <a class="page-link" href="?{% if search_query %}search={{ search_query }}&{% endif %}{% if status_filter %}status={{ status_filter }}&{% endif %}{% if file_type_filter %}file_type={{ file_type_filter }}&{% endif %}page=1">First</a>
+                        </li>
+                        <li class="page-item">
+                            <a class="page-link" href="?{% if search_query %}search={{ search_query }}&{% endif %}{% if status_filter %}status={{ status_filter }}&{% endif %}{% if file_type_filter %}file_type={{ file_type_filter }}&{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>
+                        </li>
+                    {% endif %}
+
+                    {% for num in page_obj.paginator.page_range %}
+                        {% if page_obj.number == num %}
+                            <li class="page-item active">
+                                <span class="page-link">{{ num }}</span>
+                            </li>
+                        {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                            <li class="page-item">
+                                <a class="page-link" href="?{% if search_query %}search={{ search_query }}&{% endif %}{% if status_filter %}status={{ status_filter }}&{% endif %}{% if file_type_filter %}file_type={{ file_type_filter }}&{% endif %}page={{ num }}">{{ num }}</a>
+                            </li>
+                        {% endif %}
+                    {% endfor %}
+
+                    {% if page_obj.has_next %}
+                        <li class="page-item">
+                            <a class="page-link" href="?{% if search_query %}search={{ search_query }}&{% endif %}{% if status_filter %}status={{ status_filter }}&{% endif %}{% if file_type_filter %}file_type={{ file_type_filter }}&{% endif %}page={{ page_obj.next_page_number }}">Next</a>
+                        </li>
+                        <li class="page-item">
+                            <a class="page-link" href="?{% if search_query %}search={{ search_query }}&{% endif %}{% if status_filter %}status={{ status_filter }}&{% endif %}{% if file_type_filter %}file_type={{ file_type_filter }}&{% endif %}page={{ page_obj.paginator.num_pages }}">Last</a>
+                        </li>
+                    {% endif %}
+                </ul>
+            </nav>
+            {% endif %}
+
+        {% else %}
+            <div class="text-center py-4">
+                <i class="fas fa-file-alt fa-3x text-muted mb-3"></i>
+                <h5 class="text-muted">No documents found</h5>
+                <p class="text-muted">
+                    {% if search_query or status_filter or file_type_filter %}
+                        Try adjusting your filters or 
+                        <a href="{% url 'documents:document_list' %}">clear all filters</a>.
+                    {% else %}
+                        Upload your first document to get started with AI analysis.
+                    {% endif %}
+                </p>
+                <a href="{% url 'documents:upload_document' %}" class="btn btn-primary">
+                    <i class="fas fa-upload"></i> Upload Document
+                </a>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Connect to document list WebSocket for real-time updates
+    connectListWebSocket();
+    
+    // Override the list update handler
+    function handleListUpdate(data) {
+        console.log('Document list update:', data);
+        
+        if (data.type === 'document_updated') {
+            updateDocumentRow(data.document);
+        } else if (data.type === 'document_created') {
+            // Refresh the page to show new document
+            location.reload();
+        } else if (data.type === 'document_deleted') {
+            removeDocumentRow(data.document_id);
+        }
+    }
+    
+    function updateDocumentRow(document) {
+        const row = document.querySelector(`tr[data-document-id="${document.id}"]`);
+        if (!row) return;
+        
+        // Update status badge
+        const statusBadge = document.getElementById(`status-${document.id}`);
+        if (statusBadge) {
+            statusBadge.textContent = document.status.charAt(0).toUpperCase() + document.status.slice(1);
+            statusBadge.className = `badge status-badge ${getStatusBadgeClass(document.status)}`;
+        }
+        
+        // Update progress bar
+        const progressDiv = document.getElementById(`progress-${document.id}`);
+        if (document.status === 'processing' && document.processing && progressDiv) {
+            const progressBar = progressDiv.querySelector('.progress-bar');
+            if (progressBar) {
+                progressBar.style.width = `${document.processing.progress || 0}%`;
+            }
+        } else if (progressDiv && document.status !== 'processing') {
+            progressDiv.remove();
+        }
+        
+        // Update action buttons
+        const actionsCell = row.querySelector('td:last-child .btn-group');
+        if (actionsCell) {
+            let actionButtons = `
+                <a href="/documents/${document.id}/" class="btn btn-outline-primary" title="View Details">
+                    <i class="fas fa-eye"></i>
+                </a>
+            `;
+            
+            if (document.file_url) {
+                actionButtons += `
+                    <a href="${document.file_url}" class="btn btn-outline-info" target="_blank" title="Download">
+                        <i class="fas fa-download"></i>
+                    </a>
+                `;
+            }
+            
+            if (document.status === 'processing') {
+                actionButtons += `
+                    <button class="btn btn-outline-danger" onclick="cancelProcessing('${document.id}')" title="Cancel">
+                        <i class="fas fa-stop"></i>
+                    </button>
+                `;
+            } else if (document.status === 'failed') {
+                actionButtons += `
+                    <button class="btn btn-outline-warning" onclick="reprocessDocument('${document.id}')" title="Reprocess">
+                        <i class="fas fa-redo"></i>
+                    </button>
+                `;
+            }
+            
+            actionsCell.innerHTML = actionButtons;
+        }
+    }
+    
+    function removeDocumentRow(documentId) {
+        const row = document.querySelector(`tr[data-document-id="${documentId}"]`);
+        if (row) {
+            row.remove();
+        }
+    }
+    
+    async function cancelProcessing(documentId) {
+        if (!confirm('Are you sure you want to cancel processing for this document?')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/documents/${documentId}/cancel_processing/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'Content-Type': 'application/json',
+                },
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok) {
+                alert('Processing cancelled successfully');
+                location.reload();
+            } else {
+                alert(`Error: ${data.error || 'Failed to cancel processing'}`);
+            }
+        } catch (error) {
+            console.error('Error cancelling processing:', error);
+            alert('Error cancelling processing');
+        }
+    }
+    
+    async function reprocessDocument(documentId) {
+        if (!confirm('Are you sure you want to reprocess this document?')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/documents/${documentId}/reprocess/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'Content-Type': 'application/json',
+                },
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok) {
+                alert('Document reprocessing started');
+                location.reload();
+            } else {
+                alert(`Error: ${data.error || 'Failed to start reprocessing'}`);
+            }
+        } catch (error) {
+            console.error('Error reprocessing document:', error);
+            alert('Error reprocessing document');
+        }
+    }
+    
+    // Utility function to get CSRF token
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+</script>
+{% endblock %}

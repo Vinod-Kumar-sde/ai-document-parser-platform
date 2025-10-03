@@ -1,0 +1,463 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ document.title }} - AI Document Processor{% endblock %}
+{% block page_title %}{{ document.title }}{% endblock %}
+
+{% block page_actions %}
+<div class="btn-group" role="group">
+    <a href="{% url 'documents:document_list' %}" class="btn btn-outline-secondary">
+        <i class="fas fa-arrow-left"></i> Back to List
+    </a>
+    {% if document.status == 'processing' %}
+    <button class="btn btn-outline-danger" onclick="cancelProcessing()">
+        <i class="fas fa-stop"></i> Cancel Processing
+    </button>
+    {% elif document.status == 'failed' %}
+    <button class="btn btn-outline-warning" onclick="reprocessDocument()">
+        <i class="fas fa-redo"></i> Reprocess
+    </button>
+    {% endif %}
+    {% if document.file %}
+    <a href="{{ document.file.url }}" class="btn btn-outline-info" target="_blank">
+        <i class="fas fa-download"></i> Download
+    </a>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- Document Information -->
+    <div class="col-lg-4">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">Document Information</h6>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label text-muted">Status</label>
+                    <div>
+                        <span class="badge status-badge {% if document.status == 'completed' %}bg-success text-white{% elif document.status == 'processing' %}bg-warning text-dark{% elif document.status == 'failed' %}bg-danger text-white{% elif document.status == 'uploaded' %}bg-info text-white{% else %}bg-secondary text-white{% endif %}" id="document-status">
+                            {{ document.status|title }}
+                        </span>
+                        {% if document.status == 'processing' %}
+                        <div class="progress processing-progress mt-2" id="document-progress">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                 role="progressbar" style="width: 0%" id="progress-bar"></div>
+                        </div>
+                        <small class="text-muted" id="progress-text">Initializing...</small>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label text-muted">File Type</label>
+                    <div>
+                        <span class="badge bg-secondary">{{ document.file_type|upper }}</span>
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label text-muted">File Size</label>
+                    <div>{{ document.file_size|filesizeformat }}</div>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label text-muted">Created</label>
+                    <div>{{ document.created_at|date:"M d, Y H:i" }}</div>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label text-muted">Last Updated</label>
+                    <div id="last-updated">{{ document.updated_at|date:"M d, Y H:i" }}</div>
+                </div>
+                
+                {% if document.processing_error %}
+                <div class="mb-3">
+                    <label class="form-label text-muted">Error</label>
+                    <div class="alert alert-danger">
+                        {{ document.processing_error }}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- Processing Logs -->
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">Processing Logs</h6>
+            </div>
+            <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+                <div id="processing-logs">
+                    {% if processing_logs %}
+                        {% for log in processing_logs %}
+                        <div class="mb-2 p-2 border-start border-3 
+                                    {% if log.level == 'ERROR' %}border-danger
+                                    {% elif log.level == 'WARNING' %}border-warning
+                                    {% elif log.level == 'INFO' %}border-info
+                                    {% else %}border-secondary{% endif %}">
+                            <small class="text-muted">{{ log.created_at|date:"H:i:s" }}</small>
+                            <div class="small">{{ log.message }}</div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <p class="text-muted">No processing logs available.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Document Content and Analysis -->
+    <div class="col-lg-8">
+        <!-- Analysis Results -->
+        {% if analysis %}
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">AI Analysis Results</h6>
+            </div>
+            <div class="card-body" id="analysis-results">
+                <!-- Summary -->
+                {% if analysis.summary %}
+                <div class="analysis-section">
+                    <h6><i class="fas fa-file-text text-primary"></i> Summary</h6>
+                    <p>{{ analysis.summary }}</p>
+                </div>
+                {% endif %}
+                
+                <!-- Key Points -->
+                {% if analysis.key_points %}
+                <div class="analysis-section">
+                    <h6><i class="fas fa-list text-primary"></i> Key Points</h6>
+                    <ul class="list-unstyled">
+                        {% for point in analysis.key_points %}
+                        <li class="mb-2">
+                            <i class="fas fa-chevron-right text-muted me-2"></i>
+                            {{ point }}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+                
+                <!-- Sentiment Analysis -->
+                {% if analysis.sentiment %}
+                <div class="analysis-section">
+                    <h6><i class="fas fa-heart text-primary"></i> Sentiment Analysis</h6>
+                    <div class="d-flex align-items-center">
+                        <span class="badge 
+                            {% if analysis.sentiment == 'positive' %}bg-success
+                            {% elif analysis.sentiment == 'negative' %}bg-danger
+                            {% else %}bg-secondary{% endif %} me-2">
+                            {{ analysis.sentiment|title }}
+                        </span>
+                        {% if analysis.sentiment_score %}
+                        <div class="progress flex-grow-1 me-2" style="height: 20px;">
+                            <div class="progress-bar 
+                                {% if analysis.sentiment == 'positive' %}bg-success
+                                {% elif analysis.sentiment == 'negative' %}bg-danger
+                                {% else %}bg-secondary{% endif %}" 
+                                role="progressbar" 
+                                style="width: {{ analysis.sentiment_score|floatformat:0 }}%">
+                                {{ analysis.sentiment_score|floatformat:1 }}%
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- Topics -->
+                {% if analysis.topics %}
+                <div class="analysis-section">
+                    <h6><i class="fas fa-tags text-primary"></i> Topics</h6>
+                    <div>
+                        {% for topic in analysis.topics %}
+                        <span class="badge bg-info me-1 mb-1">{{ topic }}</span>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- Analysis Metadata -->
+                <div class="analysis-section">
+                    <h6><i class="fas fa-info-circle text-primary"></i> Analysis Details</h6>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <small class="text-muted">Completion: {{ analysis.completion_percentage }}%</small>
+                        </div>
+                        <div class="col-md-6">
+                            <small class="text-muted">Analyzed: {{ analysis.created_at|date:"M d, Y H:i" }}</small>
+                        </div>
+                        {% if analysis.processing_time %}
+                        <div class="col-md-6">
+                            <small class="text-muted">Processing Time: {{ analysis.processing_time|floatformat:1 }}s</small>
+                        </div>
+                        {% endif %}
+                        {% if analysis.tokens_used %}
+                        <div class="col-md-6">
+                            <small class="text-muted">Tokens Used: {{ analysis.tokens_used }}</small>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% elif document.status == 'processing' %}
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">AI Analysis Results</h6>
+            </div>
+            <div class="card-body text-center" id="analysis-placeholder">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-3 text-muted">Analysis in progress...</p>
+                <div id="analysis-progress">
+                    <!-- Progress updates will be inserted here -->
+                </div>
+            </div>
+        </div>
+        {% elif document.status == 'completed' %}
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">AI Analysis Results</h6>
+            </div>
+            <div class="card-body text-center">
+                <i class="fas fa-exclamation-triangle fa-3x text-warning mb-3"></i>
+                <h5 class="text-muted">No Analysis Available</h5>
+                <p class="text-muted">The document was processed but no analysis results were generated.</p>
+                <button class="btn btn-primary" onclick="reprocessDocument()">
+                    <i class="fas fa-redo"></i> Reprocess Document
+                </button>
+            </div>
+        </div>
+        {% endif %}
+        
+        <!-- Extracted Text -->
+        {% if document.extracted_text %}
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">Extracted Text</h6>
+            </div>
+            <div class="card-body">
+                <div style="max-height: 400px; overflow-y: auto; white-space: pre-wrap; font-family: monospace; font-size: 0.9em; background-color: #f8f9fa; padding: 1rem; border-radius: 0.375rem;">{{ document.extracted_text }}</div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Connect to document-specific WebSocket
+    connectDocumentWebSocket('{{ document.id }}');
+    
+    // Override the document update handler
+    function handleDocumentUpdate(data) {
+        console.log('Document update:', data);
+        
+        if (data.type === 'processing_update') {
+            updateProcessingStatus(data);
+        } else if (data.type === 'processing_complete') {
+            handleProcessingComplete(data);
+        } else if (data.type === 'processing_error') {
+            handleProcessingError(data);
+        } else if (data.type === 'document_status') {
+            updateDocumentStatus(data);
+        }
+    }
+    
+    function updateProcessingStatus(data) {
+        // Update status badge
+        const statusBadge = document.getElementById('document-status');
+        if (statusBadge) {
+            statusBadge.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+            statusBadge.className = `badge status-badge ${getStatusBadgeClass(data.status)}`;
+        }
+        
+        // Update progress bar
+        const progressBar = document.getElementById('progress-bar');
+        const progressText = document.getElementById('progress-text');
+        
+        if (progressBar && data.progress !== undefined) {
+            progressBar.style.width = `${data.progress}%`;
+        }
+        
+        if (progressText) {
+            progressText.textContent = data.message || data.step || 'Processing...';
+        }
+        
+        // Add to processing logs
+        if (data.message) {
+            addProcessingLog('INFO', data.message, data.timestamp);
+        }
+        
+        // Update analysis progress
+        const analysisProgress = document.getElementById('analysis-progress');
+        if (analysisProgress && data.step) {
+            analysisProgress.innerHTML = `<p class="text-muted">${data.step}</p>`;
+        }
+    }
+    
+    function handleProcessingComplete(data) {
+        // Update status
+        const statusBadge = document.getElementById('document-status');
+        if (statusBadge) {
+            statusBadge.textContent = 'Completed';
+            statusBadge.className = 'badge status-badge bg-success';
+        }
+        
+        // Hide progress bar
+        const progressDiv = document.getElementById('document-progress');
+        if (progressDiv) {
+            progressDiv.style.display = 'none';
+        }
+        
+        // Add completion log
+        addProcessingLog('INFO', 'Processing completed successfully', data.timestamp);
+        
+        // Reload page to show results
+        setTimeout(() => {
+            location.reload();
+        }, 2000);
+    }
+    
+    function handleProcessingError(data) {
+        // Update status
+        const statusBadge = document.getElementById('document-status');
+        if (statusBadge) {
+            statusBadge.textContent = 'Failed';
+            statusBadge.className = 'badge status-badge bg-danger';
+        }
+        
+        // Hide progress bar
+        const progressDiv = document.getElementById('document-progress');
+        if (progressDiv) {
+            progressDiv.style.display = 'none';
+        }
+        
+        // Add error log
+        addProcessingLog('ERROR', data.error, data.timestamp);
+        
+        // Show error in analysis section
+        const analysisPlaceholder = document.getElementById('analysis-placeholder');
+        if (analysisPlaceholder) {
+            analysisPlaceholder.innerHTML = `
+                <i class="fas fa-exclamation-triangle fa-3x text-danger mb-3"></i>
+                <h5 class="text-danger">Processing Failed</h5>
+                <p class="text-muted">${data.error}</p>
+                <button class="btn btn-warning" onclick="reprocessDocument()">
+                    <i class="fas fa-redo"></i> Try Again
+                </button>
+            `;
+        }
+    }
+    
+    function updateDocumentStatus(data) {
+        // Update last updated time
+        const lastUpdated = document.getElementById('last-updated');
+        if (lastUpdated && data.timestamp) {
+            lastUpdated.textContent = formatDateTime(data.timestamp);
+        }
+    }
+    
+    function addProcessingLog(level, message, timestamp) {
+        const logsContainer = document.getElementById('processing-logs');
+        if (!logsContainer) return;
+        
+        const borderClass = level === 'ERROR' ? 'border-danger' : 
+                           level === 'WARNING' ? 'border-warning' : 
+                           level === 'INFO' ? 'border-info' : 'border-secondary';
+        
+        const logEntry = document.createElement('div');
+        logEntry.className = `mb-2 p-2 border-start border-3 ${borderClass}`;
+        logEntry.innerHTML = `
+            <small class="text-muted">${new Date(timestamp).toLocaleTimeString()}</small>
+            <div class="small">${message}</div>
+        `;
+        
+        logsContainer.insertBefore(logEntry, logsContainer.firstChild);
+        
+        // Keep only last 20 logs
+        const logs = logsContainer.children;
+        if (logs.length > 20) {
+            logsContainer.removeChild(logs[logs.length - 1]);
+        }
+    }
+    
+    async function cancelProcessing() {
+        if (!confirm('Are you sure you want to cancel processing for this document?')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/documents/{{ document.id }}/cancel_processing/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'Content-Type': 'application/json',
+                },
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok) {
+                alert('Processing cancelled successfully');
+                location.reload();
+            } else {
+                alert(`Error: ${data.error || 'Failed to cancel processing'}`);
+            }
+        } catch (error) {
+            console.error('Error cancelling processing:', error);
+            alert('Error cancelling processing');
+        }
+    }
+    
+    async function reprocessDocument() {
+        if (!confirm('Are you sure you want to reprocess this document?')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/documents/{{ document.id }}/reprocess/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'Content-Type': 'application/json',
+                },
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok) {
+                alert('Document reprocessing started');
+                location.reload();
+            } else {
+                alert(`Error: ${data.error || 'Failed to start reprocessing'}`);
+            }
+        } catch (error) {
+            console.error('Error reprocessing document:', error);
+            alert('Error reprocessing document');
+        }
+    }
+    
+    // Utility function to get CSRF token
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+</script>
+{% endblock %}
